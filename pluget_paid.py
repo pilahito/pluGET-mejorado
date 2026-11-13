@@ -44,26 +44,17 @@ def validate_plugin_jar(jar_path: Path) -> None:
 
 
 def scan_for_malware(jar_path: Path, *, timeout: int = 120) -> None:
-    """Scan a JAR with ClamAV's ``clamscan`` and fail closed on errors.
-
-    ClamAV must be installed and its virus definitions kept up to date. A clean
-    result is not a guarantee of safety; this is one defense-in-depth check and
-    does not execute or load the plugin.
-    """
+    """Scan a JAR with ClamAV's ``clamscan`` and fail closed on errors."""
     scanner = shutil.which("clamscan")
     if scanner is None:
         raise PluginInstallError(
             "Malware scan unavailable: install ClamAV and make 'clamscan' available "
             "on PATH. The plugin was not installed."
         )
-
     try:
         result = subprocess.run(
             [scanner, "--no-summary", "--", str(jar_path)],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
+            capture_output=True, text=True, timeout=timeout, check=False,
         )
     except subprocess.TimeoutExpired as exc:
         raise PluginInstallError(
@@ -78,30 +69,22 @@ def scan_for_malware(jar_path: Path, *, timeout: int = 120) -> None:
         detail = (result.stdout or result.stderr).strip().splitlines()
         finding = detail[-1] if detail else "ClamAV reported an infection."
         raise PluginInstallError(f"Malware detected; plugin was not installed: {finding}")
-
     detail = (result.stderr or result.stdout).strip()
     if len(detail) > 500:
         detail = detail[-500:]
     raise PluginInstallError(
-        f"ClamAV scan failed (exit code {result.returncode}); plugin was not installed. "
-        f"{detail}"
+        f"ClamAV scan failed (exit code {result.returncode}); plugin was not installed. {detail}"
     )
 
 
 def install_plugin(jar_path: Path, plugin_dir: Path, *, overwrite: bool = False) -> Path:
-    """Scan, validate, and atomically copy a plugin JAR into ``plugin_dir``.
-
-    This function only installs a local file supplied by the user. It does not log in
-    to a marketplace or download content, and it never handles provider credentials.
-    """
+    """Scan, validate, and atomically copy a plugin JAR into ``plugin_dir``."""
     source = jar_path.expanduser().resolve()
     destination_dir = plugin_dir.expanduser().resolve()
     validate_plugin_jar(source)
     scan_for_malware(source)
-
     if source == destination_dir / source.name:
         raise PluginInstallError("The JAR is already in the target plugins directory.")
-
     try:
         destination_dir.mkdir(parents=True, exist_ok=True)
         if not destination_dir.is_dir():
@@ -114,7 +97,6 @@ def install_plugin(jar_path: Path, plugin_dir: Path, *, overwrite: bool = False)
         raise PluginInstallError(
             f"{destination.name} already exists; pass --overwrite to replace it."
         )
-
     temp_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -125,11 +107,9 @@ def install_plugin(jar_path: Path, plugin_dir: Path, *, overwrite: bool = False)
                 shutil.copyfileobj(source_file, temp_file)
             temp_file.flush()
             os.fsync(temp_file.fileno())
-
         if overwrite:
             os.replace(temp_path, destination)
         else:
-            # Hard-linking gives no-overwrite installs an atomic, race-safe create.
             os.link(temp_path, destination)
             temp_path.unlink()
         return destination
@@ -149,20 +129,28 @@ def install_plugin(jar_path: Path, plugin_dir: Path, *, overwrite: bool = False)
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Scan and install a plugin JAR obtained from its official provider."
+        description="Install plugins or download the latest stable Paper Minecraft server."
     )
     parser.add_argument("jar", nargs="?", type=Path, help="Path to your downloaded plugin .jar")
     parser.add_argument(
         "--spigot", metavar="RESOURCE_ID",
-        help="Download a publicly accessible Spigot resource by its numeric ID via Spiget",
+        help="Download a publicly accessible Spigot resource by numeric ID via Spiget",
     )
     parser.add_argument(
-        "--plugins-dir", required=True, type=Path,
-        help="Server plugins directory (created if it does not exist)",
+        "--paper-latest", action="store_true",
+        help="Check the current Paper server version and download the latest stable Paper build",
+    )
+    parser.add_argument(
+        "--server-jar", type=Path,
+        help="Existing server JAR to inspect/replace, or destination path for a new server JAR",
+    )
+    parser.add_argument(
+        "--plugins-dir", type=Path,
+        help="Server plugins directory (required for a local or Spigot plugin install)",
     )
     parser.add_argument(
         "--overwrite", action="store_true",
-        help="Replace a plugin JAR with the same filename",
+        help="Replace an existing plugin/server JAR; Paper updates preserve a .previous backup",
     )
     return parser
 
@@ -170,22 +158,39 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if bool(args.jar) == bool(args.spigot):
-        parser.error("provide exactly one source: a local JAR path or --spigot RESOURCE_ID")
+    modes = sum((args.jar is not None, args.spigot is not None, args.paper_latest))
+    if modes != 1:
+        parser.error("choose exactly one mode: a local JAR, --spigot RESOURCE_ID, or --paper-latest")
 
     try:
-        if args.spigot:
+        if args.paper_latest:
+            if args.server_jar is None:
+                parser.error("--paper-latest requires --server-jar PATH")
+            from paper_server import download_latest_paper
+
+            installed, current, latest, build = download_latest_paper(
+                args.server_jar, overwrite=args.overwrite
+            )
+            print(f"Current Paper/Minecraft version: {current or 'could not be detected'}")
+            print(f"Latest stable Paper build: Minecraft {latest}, build {build}")
+            print(f"Downloaded server JAR: {installed}")
+        elif args.spigot:
+            if args.plugins_dir is None:
+                parser.error("--spigot requires --plugins-dir PATH")
             from spigot import install_spigot_resource
 
             installed = install_spigot_resource(
                 args.spigot, args.plugins_dir, overwrite=args.overwrite
             )
+            print(f"Installed plugin: {installed}")
         else:
+            if args.plugins_dir is None:
+                parser.error("a local plugin JAR requires --plugins-dir PATH")
             installed = install_plugin(args.jar, args.plugins_dir, overwrite=args.overwrite)
+            print(f"Installed plugin: {installed}")
     except PluginInstallError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
-    print(f"Installed plugin: {installed}")
     return 0
 
 

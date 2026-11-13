@@ -1,6 +1,18 @@
 # pluGET-mejorado
 
-A small, safe first step toward managing plugins obtained from different Minecraft plugin providers. This repository provides a local installer for plugin JARs that you have already downloaded through the provider's official purchase/account flow, plus installation of publicly downloadable Spigot resources through Spiget.
+A small tool for safely installing Minecraft plugins and updating a Paper server. Plugins downloaded from marketplaces must be obtained through the provider's official flow; public Spigot resources can also be installed using Spiget.
+
+## Check and download the latest Paper server
+
+Install/download the stable Paper server build to a new path (the folder is created if needed):
+
+```bash
+python pluget_paid.py --paper-latest --server-jar /path/to/server/paper.jar
+```
+
+The tool checks the existing JAR's embedded version when it can, queries Paper's public API for the latest stable Minecraft version and build, downloads the official JAR, verifies its SHA-256 checksum, and validates its ZIP/JAR structure. If a server JAR already exists, it will not replace it unless you explicitly add `--overwrite`; when replacing, it saves the old file as `paper.jar.previous`. Stop the Minecraft server before replacing its server JAR.
+
+This feature currently supports **Paper only**. It does not update Spigot, Purpur, Fabric, Forge, or Vanilla server files. Some server JARs do not expose a readable embedded version, in which case the current version is reported as unknown. ClamAV is not used for server JARs because Paper's published SHA-256 checksum is verified; keep your software and server backups current.
 
 ## Install a plugin you own
 
@@ -14,15 +26,15 @@ The installer checks that the file is a JAR containing `plugin.yml` or `paper-pl
 
 ## Spigot resources
 
-Publicly downloadable Spigot resources can be installed by their numeric resource ID using Spiget's public API. For example, the LuckPerms Spigot resource ID is `28140`:
+Publicly downloadable Spigot resources can be installed by their numeric resource ID using Spiget's public API. For example:
 
 ```bash
 python pluget_paid.py --spigot 28140 --plugins-dir /path/to/server/plugins
 ```
 
-The downloaded JAR is validated and scanned by ClamAV before installation. This integration does not sign in to a Spigot account, download paid/premium resources, or bypass purchase or download controls. For a purchased resource, download it through Spigot's supported account flow and install the local JAR with the first command. The code uses Spiget's public API; availability and API limits are controlled by that service.
+The downloaded plugin JAR is validated and scanned with ClamAV. This integration does not sign in to a Spigot account, download paid/premium resources, or bypass purchase controls. Download purchased resources through Spigot's supported account flow, then install the local JAR.
 
-A clean antivirus result is not a guarantee that a plugin is safe. ClamAV signatures can miss new or obfuscated threats; obtain plugins from trusted sources, keep definitions current, and review permissions and plugin behavior. This tool does not execute or load the JAR while scanning.
+A clean antivirus result is not a guarantee that a plugin is safe. ClamAV signatures can miss new or obfuscated threats; use trusted sources and keep definitions up to date.
 
 ## Tests
 
@@ -30,6 +42,8 @@ A clean antivirus result is not a guarantee that a plugin is safe. ClamAV signat
 python -m unittest discover -s tests -v
 ```
 
+The tests require no network access; external API and scanner calls are mocked.
+
 ## Scope
 
-This is an initial implementation, not a complete copy of upstream [Neocky/pluGET](https://github.com/Neocky/pluGET). Remote SFTP/FTP uploads and provider-specific official login flows are not implemented yet.
+This is an initial implementation, not a complete copy of upstream [Neocky/pluGET](https://github.com/Neocky/pluGET). Paper server updates and public Spigot/Spiget resource installs are supported. Remote SFTP/FTP uploads and provider-specific official login flows are not implemented yet.
