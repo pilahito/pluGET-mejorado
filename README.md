@@ -1,51 +1,73 @@
 # pluGET-mejorado
 
-A small tool for safely installing Minecraft plugins and updating a Paper server. Public Spigot resources can be downloaded via Spiget, with a compatibility check against the server's Minecraft version.
+A small tool for safely installing Minecraft plugins and updating a Paper server. Public Spigot resources can be downloaded via Spiget, with compatibility checked against your Minecraft version.
 
-## Install a Spigot plugin compatible with your server
+## Automatic Spigot updates on Ubuntu
 
-If you have a Paper server JAR, provide its path and the tool will try to read its Minecraft version:
+Create a JSON file such as `spigot-updates.json` (use absolute paths):
 
-```bash
-python pluget_paid.py --spigot 28140 --paper-server-jar /path/to/server/paper.jar --plugins-dir /path/to/server/plugins
+```json
+{
+  "minecraft_version": "1.21.4",
+  "plugins_dir": "/home/minecraft/server/plugins",
+  "resources": [28140, 12345]
+}
 ```
 
-Or provide the server's Minecraft version directly (also works with Spigot and other Bukkit-compatible servers):
+Install ClamAV and update its signatures before enabling automatic installation. Run one update pass manually first:
 
 ```bash
-python pluget_paid.py --spigot 28140 --minecraft-version 1.21.4 --plugins-dir /path/to/server/plugins
+sudo apt update && sudo apt install clamav clamav-freshclam
+sudo freshclam
+python3 pluget_paid.py --update-spigot /home/minecraft/spigot-updates.json
 ```
 
-Before downloading, the program compares the requested version with Spiget's `testedVersions` metadata. It refuses to download when the version is not listed or the metadata is missing. This check is only as accurate as the resource's metadata and cannot guarantee runtime compatibility. Many Spigot server JARs do not expose their Minecraft version in a standard way; in that case, specify `--minecraft-version` yourself.
+The updater checks Spiget's `testedVersions` metadata for each resource, downloads only public Spigot resources, compares each JAR with the installed file, and skips unchanged files. Changed JARs are validated and scanned with ClamAV before atomic replacement. If an update fails compatibility checks, network access, validation, or scanning, the existing plugin remains in place. Stop the Minecraft server before updates; schedule a maintenance window so the server is not loading a JAR while it is replaced.
 
-Spiget only provides a resource's currently downloadable version, not necessarily every historical release by Minecraft version. This integration does not sign in to a Spigot account, download paid/premium resources, or bypass purchase controls. For purchased resources, download through Spigot's supported account flow and install the local JAR as described below.
+Spiget provides the current publicly downloadable resource version; it may not expose older files individually by Minecraft version. Compatibility relies on author-provided metadata and is not guaranteed. Paid resources are not authenticated or downloaded by this command. Obtain purchased plugins through Spigot's supported account flow; additional marketplaces can be integrated later through their official interfaces.
 
-## Install a plugin you own
+### Schedule daily with Ubuntu cron
 
-Install ClamAV and ensure the `clamscan` command is available on `PATH`. Keep its virus definitions updated. Then:
+Run `crontab -e` as the same Linux user that owns the Minecraft server and add a daily job (adjust paths and time):
+
+```cron
+0 5 * * * /usr/bin/python3 /home/minecraft/pluGET-mejorado/pluget_paid.py --update-spigot /home/minecraft/spigot-updates.json >> /home/minecraft/spigot-updates.log 2>&1
+```
+
+Cron does not stop the Minecraft server. For production, schedule this during a maintenance window or stop/start the service around the update using a dedicated service manager and carefully reviewed permissions.
+
+## Install an individual public Spigot resource
 
 ```bash
-python pluget_paid.py /path/to/YourPlugin.jar --plugins-dir /path/to/server/plugins
+python3 pluget_paid.py --spigot 28140 --minecraft-version 1.21.4 --plugins-dir /home/minecraft/server/plugins
 ```
 
-The installer checks that the file is a JAR containing `plugin.yml` or `paper-plugin.yml`, scans it with ClamAV, and only then copies it into the target directory. It does not replace an existing file unless `--overwrite` is supplied. Stop the Minecraft server before installing or replacing plugins.
-
-## Check and download the latest Paper server
+A Paper JAR can be used to detect its Minecraft version:
 
 ```bash
-python pluget_paid.py --paper-latest --server-jar /path/to/server/paper.jar
+python3 pluget_paid.py --spigot 28140 --paper-server-jar /home/minecraft/server/paper.jar --plugins-dir /home/minecraft/server/plugins
 ```
 
-The tool detects the current version when possible, downloads the latest stable Paper build, checks its published SHA-256, and preserves an existing server JAR as `.previous` when `--overwrite` is used. Stop the server before updating. This currently supports Paper only.
+## Install a plugin JAR you already downloaded
+
+```bash
+python3 pluget_paid.py /path/to/YourPlugin.jar --plugins-dir /home/minecraft/server/plugins
+```
+
+This path requires ClamAV, validates the plugin JAR, and does not replace an existing file without `--overwrite`.
+
+## Update Paper server
+
+```bash
+python3 pluget_paid.py --paper-latest --server-jar /home/minecraft/server/paper.jar
+```
+
+The tool verifies Paper's published SHA-256 checksum. Existing server JARs are preserved unless you explicitly add `--overwrite`; stop the server before replacing one.
 
 ## Tests
 
 ```bash
-python -m unittest discover -s tests -v
+python3 -m unittest discover -s tests -v
 ```
 
-The tests require no network access; external API and scanner calls are mocked.
-
-## Security notes
-
-A clean ClamAV result does not guarantee a plugin is safe. Use trusted sources and keep antivirus definitions updated. Server JAR integrity is checked with Paper's published SHA-256 checksum.
+Tests mock network and scanner calls. A clean antivirus result does not guarantee a plugin is safe. Use trusted sources and keep ClamAV definitions current.

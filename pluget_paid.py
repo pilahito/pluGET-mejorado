@@ -126,52 +126,43 @@ def install_plugin(jar_path: Path, plugin_dir: Path, *, overwrite: bool = False)
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Install plugins or download the latest stable Paper Minecraft server."
+        description="Install plugins, update Spigot resources, or manage Paper server builds."
     )
     parser.add_argument("jar", nargs="?", type=Path, help="Path to your downloaded plugin .jar")
-    parser.add_argument(
-        "--spigot", metavar="RESOURCE_ID",
-        help="Download a publicly accessible Spigot resource by numeric ID via Spiget",
-    )
-    parser.add_argument(
-        "--minecraft-version", metavar="VERSION",
-        help="Minecraft version used to check Spiget's tested-version metadata, e.g. 1.21.4",
-    )
-    parser.add_argument(
-        "--paper-server-jar", type=Path,
-        help="Paper server JAR; detect its Minecraft version automatically for --spigot",
-    )
-    parser.add_argument(
-        "--paper-latest", action="store_true",
-        help="Check the current Paper server version and download the latest stable Paper build",
-    )
-    parser.add_argument(
-        "--server-jar", type=Path,
-        help="Existing server JAR to inspect/replace, or destination path for a new server JAR",
-    )
+    parser.add_argument("--spigot", metavar="RESOURCE_ID", help="Download a public Spigot resource via Spiget")
+    parser.add_argument("--update-spigot", type=Path, metavar="CONFIG.json", help="Update configured Spigot resources")
+    parser.add_argument("--minecraft-version", metavar="VERSION", help="Minecraft version for Spiget compatibility checks")
+    parser.add_argument("--paper-server-jar", type=Path, help="Paper JAR used to detect Minecraft version")
+    parser.add_argument("--paper-latest", action="store_true", help="Download the latest stable Paper server")
+    parser.add_argument("--server-jar", type=Path, help="Paper server JAR path")
     parser.add_argument("--plugins-dir", type=Path, help="Server plugins directory")
-    parser.add_argument(
-        "--overwrite", action="store_true",
-        help="Replace an existing plugin/server JAR; Paper updates preserve a .previous backup",
-    )
+    parser.add_argument("--overwrite", action="store_true", help="Replace an existing plugin/server JAR")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    modes = sum((args.jar is not None, args.spigot is not None, args.paper_latest))
+    modes = sum((args.jar is not None, args.spigot is not None, args.update_spigot is not None, args.paper_latest))
     if modes != 1:
-        parser.error("choose exactly one mode: a local JAR, --spigot RESOURCE_ID, or --paper-latest")
+        parser.error("choose exactly one mode: local JAR, --spigot ID, --update-spigot CONFIG.json, or --paper-latest")
 
     try:
+        if args.update_spigot is not None:
+            if args.minecraft_version or args.paper_server_jar or args.plugins_dir:
+                parser.error("--update-spigot reads version and plugins directory from its JSON config")
+            from spigot_updates import update_configured_spigot
+            results = update_configured_spigot(args.update_spigot)
+            failed = False
+            for resource_id, status, path in results:
+                print(f"Spigot {resource_id}: {status}" + (f" -> {path}" if path else ""))
+                failed |= status.startswith("error:")
+            return 1 if failed else 0
         if args.paper_latest:
             if args.server_jar is None:
                 parser.error("--paper-latest requires --server-jar PATH")
             from paper_server import download_latest_paper
-            installed, current, latest, build = download_latest_paper(
-                args.server_jar, overwrite=args.overwrite
-            )
+            installed, current, latest, build = download_latest_paper(args.server_jar, overwrite=args.overwrite)
             print(f"Current Paper/Minecraft version: {current or 'could not be detected'}")
             print(f"Latest stable Paper build: Minecraft {latest}, build {build}")
             print(f"Downloaded server JAR: {installed}")
@@ -180,8 +171,7 @@ def main(argv: list[str] | None = None) -> int:
                 parser.error("--spigot requires --plugins-dir PATH")
             from spigot import install_spigot_resource
             installed = install_spigot_resource(
-                args.spigot,
-                args.plugins_dir,
+                args.spigot, args.plugins_dir,
                 minecraft_version=args.minecraft_version,
                 server_jar=args.paper_server_jar,
                 overwrite=args.overwrite,
