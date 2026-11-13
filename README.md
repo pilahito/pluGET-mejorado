@@ -26,6 +26,30 @@ The updater checks Spiget's `testedVersions` metadata for each resource, downloa
 
 Spiget provides the current publicly downloadable resource version; it may not expose older files individually by Minecraft version. Compatibility relies on author-provided metadata and is not guaranteed. Paid resources are not authenticated or downloaded by this command. Obtain purchased plugins through Spigot's supported account flow; additional marketplaces can be integrated later through their official interfaces.
 
+### Prepare updates without write access to the server folder (staging)
+
+If the plugins folder belongs to another Linux user, prepare the updates in a staging folder you own and let that user copy them in:
+
+```bash
+python3 pluget_paid.py --update-spigot /home/minecraft/spigot-updates.json --stage-dir /home/minecraft/staging
+```
+
+Each staged JAR is validated and scanned with ClamAV, and gets a `<name>.jar.informe.json` with its Spigot ID, size and SHA-256. Nothing is written to the plugins folder. Applying the files, and restarting the server, stays a manual step.
+
+Two optional settings in the JSON config:
+
+```json
+{
+  "minecraft_version": "1.21.4",
+  "plugins_dir": "/home/minecraft/server/plugins",
+  "solo_estables": true,
+  "resources": [28140, {"id": 9089, "archivo": "EssentialsX-2.22.1.jar"}]
+}
+```
+
+- `archivo` is the file name of the JAR already installed. Without it the updater saves `Name-spigot-ID.jar`, which would sit next to the existing JAR and load the plugin twice. Use `archivo` for every plugin that is already installed.
+- `solo_estables` skips a resource when its latest version name has a prerelease marker such as beta, alpha, RC, SNAPSHOT or dev. It only sees what is written in the version name.
+
 ### Schedule daily with Ubuntu cron
 
 Run `crontab -e` as the same Linux user that owns the Minecraft server and add a daily job (adjust paths and time):

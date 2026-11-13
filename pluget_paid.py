@@ -124,6 +124,29 @@ def install_plugin(jar_path: Path, plugin_dir: Path, *, overwrite: bool = False)
                 pass
 
 
+def write_stage_report(jar: Path, resource_id: str, stage_dir: Path) -> Path:
+    """Write <jar>.informe.json next to a staged JAR: Spigot id, size and SHA-256."""
+    import hashlib
+    import json
+    from datetime import datetime, timezone
+
+    digest = hashlib.sha256()
+    with jar.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(64 * 1024), b""):
+            digest.update(chunk)
+    report = {
+        "archivo": jar.name,
+        "spigot_id": str(resource_id),
+        "bytes": jar.stat().st_size,
+        "sha256": digest.hexdigest(),
+        "preparado_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "estado": "pendiente_de_aplicar",
+    }
+    report_path = stage_dir.expanduser().resolve() / f"{jar.name}.informe.json"
+    report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return report_path
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Install plugins, update Spigot resources, or manage Paper server builds."
@@ -136,6 +159,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--paper-latest", action="store_true", help="Download the latest stable Paper server")
     parser.add_argument("--server-jar", type=Path, help="Paper server JAR path")
     parser.add_argument("--plugins-dir", type=Path, help="Server plugins directory")
+    parser.add_argument(
+        "--stage-dir", type=Path,
+        help="With --spigot or --update-spigot: write verified, scanned JARs here instead of the "
+             "plugins directory, with a .informe.json each. Another user then copies them in.",
+    )
     parser.add_argument("--overwrite", action="store_true", help="Replace an existing plugin/server JAR")
     return parser
 
@@ -147,15 +175,20 @@ def main(argv: list[str] | None = None) -> int:
     if modes != 1:
         parser.error("choose exactly one mode: local JAR, --spigot ID, --update-spigot CONFIG.json, or --paper-latest")
 
+    if args.stage_dir is not None and args.spigot is None and args.update_spigot is None:
+        parser.error("--stage-dir is only available with --spigot or --update-spigot")
+
     try:
         if args.update_spigot is not None:
             if args.minecraft_version or args.paper_server_jar or args.plugins_dir:
                 parser.error("--update-spigot reads version and plugins directory from its JSON config")
             from spigot_updates import update_configured_spigot
-            results = update_configured_spigot(args.update_spigot)
+            results = update_configured_spigot(args.update_spigot, stage_dir=args.stage_dir)
             failed = False
             for resource_id, status, path in results:
                 print(f"Spigot {resource_id}: {status}" + (f" -> {path}" if path else ""))
+                if status == "staged" and path is not None:
+                    write_stage_report(path, resource_id, args.stage_dir)
                 failed |= status.startswith("error:")
             return 1 if failed else 0
         if args.paper_latest:
@@ -167,16 +200,23 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Latest stable Paper build: Minecraft {latest}, build {build}")
             print(f"Downloaded server JAR: {installed}")
         elif args.spigot:
-            if args.plugins_dir is None:
-                parser.error("--spigot requires --plugins-dir PATH")
+            if args.plugins_dir is None and args.stage_dir is None:
+                parser.error("--spigot requires --plugins-dir PATH or --stage-dir PATH")
+            if args.plugins_dir is not None and args.stage_dir is not None:
+                parser.error("use either --stage-dir or --plugins-dir, not both")
             from spigot import install_spigot_resource
+            target = args.stage_dir if args.stage_dir is not None else args.plugins_dir
             installed = install_spigot_resource(
-                args.spigot, args.plugins_dir,
+                args.spigot, target,
                 minecraft_version=args.minecraft_version,
                 server_jar=args.paper_server_jar,
                 overwrite=args.overwrite,
             )
-            print(f"Installed plugin: {installed}")
+            if args.stage_dir is not None:
+                print(f"Staged plugin: {installed}")
+                print(f"Report: {write_stage_report(installed, args.spigot, args.stage_dir)}")
+            else:
+                print(f"Installed plugin: {installed}")
         else:
             if args.plugins_dir is None:
                 parser.error("a local plugin JAR requires --plugins-dir PATH")

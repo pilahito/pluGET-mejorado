@@ -13,16 +13,29 @@ from spigot import (
     MAX_DOWNLOAD_BYTES,
     _download_resource,
     _fetch_resource,
+    _latest_version_name,
     _safe_filename,
+    is_prerelease_version,
     _is_supported_version,
     _normalize_version,
 )
+
+
+def _validate_jar_name(name: str) -> str:
+    """Accept only a bare .jar file name, never a path."""
+    if not isinstance(name, str) or not name.endswith(".jar") or name != Path(name).name or name in {".jar", "..jar"}:
+        raise PluginInstallError(f"'archivo' must be a bare .jar file name, got: {name!r}")
+    return name
 
 
 def update_spigot_resource(
     resource_id: str,
     plugins_dir: Path,
     minecraft_version: str,
+    *,
+    stage_dir: Path | None = None,
+    filename: str | None = None,
+    stable_only: bool = False,
 ) -> tuple[str, Path | None]:
     """Install a compatible public Spiget resource only when its JAR has changed.
 
@@ -50,8 +63,17 @@ def update_spigot_resource(
             "update skipped."
         )
 
+    if stable_only:
+        version_name = _latest_version_name(resource_id)
+        if is_prerelease_version(version_name):
+            return f"skipped: latest version '{version_name}' is a prerelease", None
+
     destination_dir = plugins_dir.expanduser().resolve()
-    destination = destination_dir / _safe_filename(resource["name"], resource_id)
+    # Use the name of the JAR already installed when given, so an update replaces it
+    # instead of leaving two copies of the same plugin in the folder.
+    name = _validate_jar_name(filename) if filename else _safe_filename(resource["name"], resource_id)
+    destination = destination_dir / name
+    target_dir = stage_dir.expanduser().resolve() if stage_dir is not None else destination_dir
     with tempfile.TemporaryDirectory(prefix="pluget-spigot-update-") as temp_dir:
         candidate = Path(temp_dir) / destination.name
         _download_resource(resource_id, candidate)
@@ -60,11 +82,13 @@ def update_spigot_resource(
             existing_hash = hashlib.sha256(destination.read_bytes()).digest()
             if candidate_hash == existing_hash:
                 return "unchanged", destination
-        installed = install_plugin(candidate, destination_dir, overwrite=True)
-        return "updated", installed
+        installed = install_plugin(candidate, target_dir, overwrite=True)
+        return ("staged" if stage_dir is not None else "updated"), installed
 
 
-def update_configured_spigot(config_path: Path) -> list[tuple[str, str, Path | None]]:
+def update_configured_spigot(
+    config_path: Path, *, stage_dir: Path | None = None
+) -> list[tuple[str, str, Path | None]]:
     """Update the public Spigot resources listed in a JSON config file."""
     config_path = config_path.expanduser()
     try:
@@ -85,11 +109,18 @@ def update_configured_spigot(config_path: Path) -> list[tuple[str, str, Path | N
     if not isinstance(resources, list) or not resources:
         raise PluginInstallError("Update config needs a non-empty 'resources' list of Spigot IDs.")
 
+    stable_only = bool(config.get("solo_estables", False))
     results: list[tuple[str, str, Path | None]] = []
-    for resource_id in resources:
+    for entry in resources:
+        # A resource is either an ID, or {"id": 9089, "archivo": "InstalledName.jar"}.
+        if isinstance(entry, dict):
+            resource_id, filename = entry.get("id"), entry.get("archivo")
+        else:
+            resource_id, filename = entry, None
         try:
             status, path = update_spigot_resource(
-                str(resource_id), Path(plugins_dir), minecraft_version.strip()
+                str(resource_id), Path(plugins_dir), minecraft_version.strip(),
+                stage_dir=stage_dir, filename=filename, stable_only=stable_only,
             )
             results.append((str(resource_id), status, path))
         except PluginInstallError as exc:
