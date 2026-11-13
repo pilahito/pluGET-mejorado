@@ -22,7 +22,6 @@ def validate_plugin_jar(jar_path: Path) -> None:
         raise PluginInstallError(f"Not a regular file: {jar_path}")
     if jar_path.suffix.lower() != ".jar":
         raise PluginInstallError("The source file must have a .jar extension.")
-
     try:
         with zipfile.ZipFile(jar_path) as archive:
             entries = set(archive.namelist())
@@ -62,7 +61,6 @@ def scan_for_malware(jar_path: Path, *, timeout: int = 120) -> None:
         ) from exc
     except OSError as exc:
         raise PluginInstallError(f"Could not run ClamAV: {exc}") from exc
-
     if result.returncode == 0:
         return
     if result.returncode == 1:
@@ -91,7 +89,6 @@ def install_plugin(jar_path: Path, plugin_dir: Path, *, overwrite: bool = False)
             raise PluginInstallError(f"Plugin destination is not a directory: {destination_dir}")
     except OSError as exc:
         raise PluginInstallError(f"Could not prepare plugin directory: {exc}") from exc
-
     destination = destination_dir / source.name
     if destination.exists() and not overwrite:
         raise PluginInstallError(
@@ -137,6 +134,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Download a publicly accessible Spigot resource by numeric ID via Spiget",
     )
     parser.add_argument(
+        "--minecraft-version", metavar="VERSION",
+        help="Minecraft version used to check Spiget's tested-version metadata, e.g. 1.21.4",
+    )
+    parser.add_argument(
+        "--paper-server-jar", type=Path,
+        help="Paper server JAR; detect its Minecraft version automatically for --spigot",
+    )
+    parser.add_argument(
         "--paper-latest", action="store_true",
         help="Check the current Paper server version and download the latest stable Paper build",
     )
@@ -144,10 +149,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--server-jar", type=Path,
         help="Existing server JAR to inspect/replace, or destination path for a new server JAR",
     )
-    parser.add_argument(
-        "--plugins-dir", type=Path,
-        help="Server plugins directory (required for a local or Spigot plugin install)",
-    )
+    parser.add_argument("--plugins-dir", type=Path, help="Server plugins directory")
     parser.add_argument(
         "--overwrite", action="store_true",
         help="Replace an existing plugin/server JAR; Paper updates preserve a .previous backup",
@@ -167,7 +169,6 @@ def main(argv: list[str] | None = None) -> int:
             if args.server_jar is None:
                 parser.error("--paper-latest requires --server-jar PATH")
             from paper_server import download_latest_paper
-
             installed, current, latest, build = download_latest_paper(
                 args.server_jar, overwrite=args.overwrite
             )
@@ -178,14 +179,19 @@ def main(argv: list[str] | None = None) -> int:
             if args.plugins_dir is None:
                 parser.error("--spigot requires --plugins-dir PATH")
             from spigot import install_spigot_resource
-
             installed = install_spigot_resource(
-                args.spigot, args.plugins_dir, overwrite=args.overwrite
+                args.spigot,
+                args.plugins_dir,
+                minecraft_version=args.minecraft_version,
+                server_jar=args.paper_server_jar,
+                overwrite=args.overwrite,
             )
             print(f"Installed plugin: {installed}")
         else:
             if args.plugins_dir is None:
                 parser.error("a local plugin JAR requires --plugins-dir PATH")
+            if args.minecraft_version or args.paper_server_jar:
+                parser.error("version options are only available with --spigot")
             installed = install_plugin(args.jar, args.plugins_dir, overwrite=args.overwrite)
             print(f"Installed plugin: {installed}")
     except PluginInstallError as exc:
