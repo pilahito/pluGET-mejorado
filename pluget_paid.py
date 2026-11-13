@@ -151,7 +151,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Scan and install a plugin JAR obtained from its official provider."
     )
-    parser.add_argument("jar", type=Path, help="Path to your downloaded plugin .jar")
+    parser.add_argument("jar", nargs="?", type=Path, help="Path to your downloaded plugin .jar")
+    parser.add_argument(
+        "--spigot", metavar="RESOURCE_ID",
+        help="Download a publicly accessible Spigot resource by its numeric ID via Spiget",
+    )
     parser.add_argument(
         "--plugins-dir", required=True, type=Path,
         help="Server plugins directory (created if it does not exist)",
@@ -164,9 +168,20 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if bool(args.jar) == bool(args.spigot):
+        parser.error("provide exactly one source: a local JAR path or --spigot RESOURCE_ID")
+
     try:
-        installed = install_plugin(args.jar, args.plugins_dir, overwrite=args.overwrite)
+        if args.spigot:
+            from spigot import install_spigot_resource
+
+            installed = install_spigot_resource(
+                args.spigot, args.plugins_dir, overwrite=args.overwrite
+            )
+        else:
+            installed = install_plugin(args.jar, args.plugins_dir, overwrite=args.overwrite)
     except PluginInstallError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1

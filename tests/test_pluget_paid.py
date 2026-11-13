@@ -37,7 +37,6 @@ class PluginInstallerTests(unittest.TestCase):
         with patch("pluget_paid.scan_for_malware"):
             install_plugin(self.jar, self.plugins_dir)
             self.jar.write_bytes(b"not a jar")
-            # Invalid input is rejected before any existing installation is modified.
             with self.assertRaises(PluginInstallError):
                 install_plugin(self.jar, self.plugins_dir, overwrite=True)
 
