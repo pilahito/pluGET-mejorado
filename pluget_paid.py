@@ -104,6 +104,9 @@ def install_plugin(jar_path: Path, plugin_dir: Path, *, overwrite: bool = False)
                 shutil.copyfileobj(source_file, temp_file)
             temp_file.flush()
             os.fsync(temp_file.fileno())
+        # NamedTemporaryFile creates 0600 files; the server (or the account that
+        # applies a staged update) must be able to read the JAR.
+        os.chmod(temp_path, 0o644)
         if overwrite:
             os.replace(temp_path, destination)
         else:

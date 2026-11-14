@@ -117,3 +117,17 @@ class UpdateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class InstallPermissionTests(unittest.TestCase):
+    @patch("pluget_paid.scan_for_malware")
+    def test_installed_jar_is_world_readable(self, _scan):
+        from pluget_paid import install_plugin
+
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "Example.jar"
+            src.write_bytes(plugin_jar())
+            dest_dir = Path(tmp) / "stage"
+            for overwrite in (False, True):
+                installed = install_plugin(src, dest_dir, overwrite=overwrite)
+                self.assertEqual(installed.stat().st_mode & 0o777, 0o644)
