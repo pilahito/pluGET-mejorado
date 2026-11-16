@@ -66,6 +66,33 @@ def _is_supported_version(server_version: str, tested_versions: list[Any]) -> bo
     return False
 
 
+_PRERELEASE_MARKERS = re.compile(
+    r"(?i)(?<![a-z])(alpha|beta|snapshot|nightly|dev|pre|prerelease|pre-release|rc)(?![a-z])\d*"
+)
+
+
+def is_prerelease_version(version_name: str) -> bool:
+    """True when a version name carries a prerelease marker (beta, SNAPSHOT, RC, dev...).
+
+    It only sees what is written in the version name, not hidden prerelease status.
+    """
+    return bool(_PRERELEASE_MARKERS.search(version_name or ""))
+
+
+def _latest_version_name(resource_id: str) -> str:
+    """Name of the latest published version of a resource, from Spiget."""
+    url = f"{SPIGET_API}/resources/{resource_id}/versions/latest"
+    try:
+        with _request(url) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise PluginInstallError(f"Could not read the latest version of resource {resource_id}: {exc}") from exc
+    name = data.get("name") if isinstance(data, dict) else None
+    if not isinstance(name, str):
+        raise PluginInstallError(f"Spiget returned no version name for resource {resource_id}.")
+    return name
+
+
 def _safe_filename(resource_name: str, resource_id: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", resource_name).strip(".-_")
     if not cleaned:
